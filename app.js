@@ -88,8 +88,28 @@ $('#delete-task').onclick=()=>{if(confirm('Удалить задачу и всю
 $('#add-category').onclick=()=>{$('#category-form').reset();$('#category-dialog').showModal();$('#category-name').focus();};
 $('#close-category').onclick=()=>$('#category-dialog').close();
 $('#category-form').onsubmit=e=>{e.preventDefault();const name=$('#category-name').value.trim();if(!name)return;if(data.categories.some(c=>c.name.toLocaleLowerCase()===name.toLocaleLowerCase())){toast('Такая категория уже есть');return;}if(update(n=>n.categories.push({id:uid(),name}))){$('#category-dialog').close();toast('Категория добавлена');}};
-$('#export').onclick=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`poryadok-${today()}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Резервная копия скачана');};
+function downloadFile(contents, type, filename) {
+ const blob=new Blob([contents],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function csvCell(value) {
+ let text=String(value??'');
+ // Treat user text as text, preventing Excel from executing a formula.
+ if (/^[\s]*[=+@-]/.test(text) || /^[\t\r\n]/.test(text)) text="'"+text;
+ return '"'+text.replace(/"/g,'""')+'"';
+}
+function csvReport() {
+ const header=['Задача','Категория','Приоритет','Статус','Срок','Источник','Ссылка на Битрикс24','Описание','Заметки','Полная хронология'];
+ const sources={self:'Поставил себе',incoming:'Входящая задача',bitrix:'Из Битрикс24 вручную'};
+ const rows=data.tasks.map(t=>[t.title,data.categories.find(c=>c.id===t.category)?.name||'',priorities[t.priority],statuses[t.status],t.due,sources[t.source],t.link,t.description,t.history.filter(h=>h.kind==='note').map(h=>new Date(h.at).toLocaleString('ru-RU')+' — '+h.text).join('\n'),t.history.map(h=>new Date(h.at).toLocaleString('ru-RU')+' — '+h.text).join('\n')]);
+ // UTF-8 BOM lets desktop Excel detect Russian text correctly.
+ return '\uFEFF'+[header,...rows].map(row=>row.map(csvCell).join(';')).join('\r\n')+'\r\n';
+}
+$('#data-tools').onclick=()=>$('#data-dialog').showModal();
+$('#close-data').onclick=()=>$('#data-dialog').close();
+$('#export-csv').onclick=()=>{downloadFile(csvReport(),'text/csv;charset=utf-8',`poryadok-tasks-${today()}.csv`);toast('Таблица скачана. Откройте CSV в Excel.');};
+$('#export').onclick=()=>{downloadFile(JSON.stringify(data,null,2),'application/json;charset=utf-8',`poryadok-backup-${today()}.json`);toast('Резервная копия скачана. Храните её для восстановления.');};
 $('#import').onclick=()=>$('#import-file').click();
-$('#import-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{if(file.size>20000000)throw Error('Файл больше 20 МБ');const next=validate(JSON.parse(await file.text()));if(!confirm(`Импортировать ${next.tasks.length} задач? Текущие данные будут заменены. Сначала сохраните экспорт, если они вам нужны.`))return;if(storageBlocked)throw Error('Хранилище повреждено или недоступно. Импорт отменён для защиты исходных данных.');if(commit(next)){category=null;view='all';$('#search').value='';$('#priority-filter').value='all';render();toast('Данные восстановлены');}}catch(error){toast('Импорт отменён: '+error.message);}finally{e.target.value='';}};
+$('#import-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{if(file.size>20000000)throw Error('Файл больше 20 МБ');const next=validate(JSON.parse(await file.text()));if(!confirm(`Восстановить ${next.tasks.length} задач и ${next.categories.length} категорий? Текущие ${data.tasks.length} задач будут заменены. Сначала сохраните экспорт, если они вам нужны.`))return;if(storageBlocked)throw Error('Хранилище повреждено или недоступно. Импорт отменён для защиты исходных данных.');if(commit(next)){$('#data-dialog').close();category=null;view='all';$('#search').value='';$('#priority-filter').value='all';render();toast('Данные восстановлены');}}catch(error){toast('Импорт отменён: '+error.message);}finally{e.target.value='';}};
 function seedExamples(){if(data.tasks.length)return;const examples=[['Согласовать заказ с поставщиком','suppliers','high','progress','Уточнить наличие и получить счёт'],['Проверить сроки поставки','suppliers','medium','waiting','Ожидаю подтверждение от менеджера'],['Подготовить презентацию продукта','learning','high','todo','Собрать ключевые преимущества и примеры'],['Пройти обучение по новому ассортименту','learning','low','todo','Выделить 30 минут на материалы'],['Ответить на запрос клиента','work','medium','todo','Подготовить варианты и условия'],['Записать идеи на следующую неделю','personal','low','todo','Разобрать заметки и выбрать главное']];update(n=>n.tasks=examples.map(([title,category,priority,status,description],i)=>({id:uid(),title:'[Демо] '+title,category,priority,status,description,due:i%2===0?today():'',source:i===4?'incoming':'self',link:'',history:[event('Создана демонстрационная задача')]})));toast('Добавлены примеры с меткой [Демо]. Их можно удалить в карточке.');}
 render();if(storageBlocked)toast('Не удалось прочитать сохранённые данные. Исходное хранилище защищено от перезаписи.');
