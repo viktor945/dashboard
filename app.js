@@ -129,6 +129,9 @@ function accountUI() {
  $('#password-form').hidden=!cloudMode||!cloud.needsPassword;
  $('#account-controls').hidden=!cloudMode;
  $('#account-info').textContent=!cloud.configured?'Облачные аккаунты ещё не подключены. Пока можно пользоваться локальными задачами. Владелец приложения настраивает подключение Supabase.':cloudMode?'Личное пространство: '+(cloud.user?.email||'аккаунт'):'Войдите, чтобы работать со своими задачами на разных устройствах.';
+ let localCount=0;try{const raw=localStorage.getItem(KEY);if(raw)localCount=validate(JSON.parse(raw)).tasks.length;}catch{}
+ $('#migrate-local').textContent='Добавить задачи с этого устройства ('+localCount+')';
+ $('#migration-info').textContent=localCount?'Найдено '+localCount+' локальных задач. Нажмите кнопку выше, чтобы добавить их в аккаунт. Облачные задачи и локальная копия сохранятся.':'В этом браузере локальных задач нет. Можно создать новые задачи или восстановить JSON через «Импорт / экспорт». Для переноса с другого браузера сначала скачайте там резервную копию.';
  const footer=$('.sidebar-bottom');footer.textContent=cloudMode?'Личное облачное пространство':'Данные на этом устройстве';
 }
 async function loadCloud() {
@@ -183,7 +186,7 @@ $('#close-bulk').onclick=()=>$('#bulk-dialog').close();$('#bulk-text').oninput=p
 $('#bulk-form').onsubmit=async e=>{e.preventDefault();const {titles,invalid}=bulkItems();if(invalid||!titles.length)return;const categoryId=$('#bulk-category').value;const tasks=titles.map(title=>({id:uid(),title,category:categoryId,priority:'medium',status:'todo',source:'self',due:'',description:'',link:'',history:[event('Задача добавлена из списка')]}));if(data.tasks.length+tasks.length>50000){toast('Превышен лимит задач.');return;}if(await update(n=>n.tasks.push(...tasks))){$('#bulk-dialog').close();category=null;view='all';$('#search').value='';$('#priority-filter').value='all';render();toast('Добавлено задач: '+tasks.length);}};
 async function initializeCloud(){
  cloudLoading=cloud.configured;accountUI();
- try{if(await cloud.restore()){await beginCloud();if(cloud.needsPassword){accountUI();$('#account-dialog').showModal();}}else cloudLoading=false;}
+ try{if(await cloud.restore()){await beginCloud();if(cloud.needsPassword){accountUI();$('#account-dialog').showModal();}}else{cloudLoading=false;if(cloud.invitationError){accountUI();$('#account-status').textContent=cloud.invitationError;$('#account-dialog').showModal();}}}
  catch(error){if(cloud.session){cloudMode=true;data=initial();cloudLoading=true;render();accountUI();}else cloudLoading=false;setSync('Облачный вход не завершён: '+error.message);}
 }
 render();if(storageBlocked)toast('Не удалось прочитать сохранённые данные. Исходное хранилище защищено от перезаписи.');
