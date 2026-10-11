@@ -72,7 +72,7 @@ function openTask(id=null,cat=null) {
  $('#task-category').innerHTML=data.categories.map(c=>`<option value="${escapeHTML(c.id)}">${escapeHTML(c.name)}</option>`).join('');
  if(t) for(const name of ['title','category','priority','due','source','status','description','link']) form.elements[name].value=t[name];
  else { form.elements.category.value=cat||category||'inbox'; if(view==='today') form.elements.due.value=today(); if(view==='incoming') form.elements.source.value='incoming'; }
- $('#delete-task').hidden=!t; $('#history-section').hidden=!t; $('#note-text').value=''; renderHistory(); $('#task-dialog').showModal(); form.elements.title.focus();
+ $('#completion-actions').hidden=!t||t.status==='done'; $('#delete-task').hidden=!t; $('#history-section').hidden=!t; $('#note-text').value=''; renderHistory(); $('#task-dialog').showModal(); form.elements.title.focus();
 }
 const recordNames={note:'Заметка',report:'Отчёт о работе',change:'Уточнение / правка'};
 function renderHistory() { const t=data.tasks.find(t=>t.id===edited); $('#history').innerHTML=(t?.history||[]).map(h=>`<div class="event ${h.kind}"><time>${h.kind==='note'?escapeHTML(recordNames[h.recordType]||'Заметка')+' · ':''}${escapeHTML(new Date(h.at).toLocaleString('ru-RU'))}</time>${escapeHTML(h.text)}</div>`).join(''); }
@@ -85,14 +85,26 @@ $('#search').oninput=render; $('#priority-filter').onchange=render;
 $('#new-task').onclick=()=>openTask(); $('#close-dialog').onclick=()=>$('#task-dialog').close();
 $('#quick-form').onsubmit=async e=>{e.preventDefault();const title=$('#quick-title').value.trim();if(!title)return;const task={id:uid(),title,category:category||'inbox',priority:'medium',due:view==='today'?today():'',source:view==='incoming'?'incoming':'self',status:'todo',description:'',link:'',history:[event('Задача создана')]};if(await update(n=>n.tasks.push(task))){$('#quick-form').reset();if(view==='done'){view='all';render();}toast('Задача добавлена');}};
 async function handleTasks(e) {
- const check=e.target.closest('[data-complete]');if(check){await update(n=>{const t=n.tasks.find(t=>t.id===check.dataset.complete);t.status=t.status==='done'?'todo':'done';t.history.push(event(t.status==='done'?'Задача завершена':'Задача возвращена в работу'));});return;}
+ const check=e.target.closest('[data-complete]');if(check){const task=data.tasks.find(t=>t.id===check.dataset.complete);if(task.status!=='done'&&!confirm('Завершить задачу «'+task.title+'»? Она перейдёт в раздел «Завершённые».'))return;await update(n=>{const t=n.tasks.find(t=>t.id===check.dataset.complete);t.status=t.status==='done'?'todo':'done';t.history.push(event(t.status==='done'?'Задача завершена':'Задача возвращена в работу'));});return;}
  const add=e.target.closest('[data-add]');if(add){openTask(null,add.dataset.add);return;}
  const c=e.target.closest('[data-task]');if(c)openTask(c.dataset.task);
  if(e.target.closest('#examples'))await seedExamples();
 }
 $('#task-groups').onclick=handleTasks;
 $('#task-groups').onkeydown=e=>{if(e.target.matches('[data-task]')&&['Enter',' '].includes(e.key)){e.preventDefault();openTask(e.target.dataset.task);}};
-$('#task-form').onsubmit=async e=>{e.preventDefault();const f=e.target;const fields={};for(const name of ['title','category','priority','due','source','status','description','link'])fields[name]=f.elements[name].value.trim();if(!fields.title)return;if(fields.link&&!/^https?:\/\//i.test(fields.link)){toast('Для ссылки используйте http:// или https://');return;}const ok=await update(n=>{if(edited){const t=n.tasks.find(t=>t.id===edited);const changed=Object.keys(fields).filter(k=>t[k]!==fields[k]);const previous=t.status;Object.assign(t,fields);if(changed.length)t.history.push(event(previous!==t.status?'Статус: '+statuses[t.status]:'Детали задачи обновлены'));}else n.tasks.push({...fields,id:uid(),history:[event('Задача создана')]});});if(ok){$('#task-dialog').close();toast('Задача сохранена');}};
+async function saveTask(complete=false) {
+ const f=$('#task-form');if(!f.reportValidity())return;
+ const fields={};for(const name of ['title','category','priority','due','source','status','description','link'])fields[name]=f.elements[name].value.trim();
+ if(complete)fields.status='done';
+ if(!fields.title)return;
+ if(fields.link&&!/^https?:\/\//i.test(fields.link)){toast('Для ссылки используйте http:// или https://');return;}
+ const current=data.tasks.find(t=>t.id===edited);
+ if(fields.status==='done'&&current?.status!=='done'&&!confirm('Завершить задачу «'+fields.title+'»? Она перейдёт в раздел «Завершённые».'))return;
+ const ok=await update(n=>{if(edited){const t=n.tasks.find(t=>t.id===edited);const changed=Object.keys(fields).filter(k=>t[k]!==fields[k]);const previous=t.status;Object.assign(t,fields);if(changed.length)t.history.push(event(previous!==t.status?'Статус: '+statuses[t.status]:'Детали задачи обновлены'));}else n.tasks.push({...fields,id:uid(),history:[event('Задача создана')]});});
+ if(ok){$('#task-dialog').close();toast(complete?'Задача завершена':'Задача сохранена');}
+}
+$('#task-form').onsubmit=async e=>{e.preventDefault();await saveTask();};
+$('#complete-task').onclick=()=>saveTask(true);
 $('#note-form').onsubmit=async e=>{e.preventDefault();const text=$('#note-text').value.trim();if(!text)return;if(await update(n=>n.tasks.find(t=>t.id===edited).history.push({...event(text,'note'),recordType:$('#note-kind').value}))){$('#note-text').value='';renderHistory();toast('Заметка добавлена');}};
 $('#delete-task').onclick=async()=>{if(confirm('Удалить задачу и всю её хронологию?'))if(await update(n=>n.tasks=n.tasks.filter(t=>t.id!==edited))){$('#task-dialog').close();toast('Задача удалена');}};
 $('#add-category').onclick=()=>{$('#category-form').reset();$('#category-dialog').showModal();$('#category-name').focus();};
