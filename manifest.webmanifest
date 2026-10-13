@@ -1,0 +1,20 @@
+{
+  "id": "./",
+  "name": "Порядок — рабочие и личные задачи",
+  "short_name": "Порядок",
+  "description": "Рабочий дашборд и личный планировщик с заметками и отчётами",
+  "lang": "ru",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f9f8",
+  "theme_color": "#29785a",
+  "icons": [
+    {"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ],
+  "shortcuts": [
+    {"name": "Рабочий дашборд", "short_name": "Рабочее", "url": "./?workspace=work", "icons": [{"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png"}]},
+    {"name": "Личный планировщик", "short_name": "Личное", "url": "./?workspace=personal", "icons": [{"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png"}]}
+  ]
+}
