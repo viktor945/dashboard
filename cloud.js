@@ -3,7 +3,7 @@
 class DashboardCloud {
  constructor(config) {
   this.url=(config.supabaseUrl||'').replace(/\/$/,'');this.key=config.supabasePublishableKey||'';
-  this.session=null;this.user=null;this.revision=null;
+  this.session=null;this.user=null;this.revision=null;this.verifiedToken=null;
   this.sessionKey='poryadok.auth.v1';
  }
  get configured(){if(this.key.split('.').length===3){try{if(JSON.parse(atob(this.key.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).role==='service_role')return false;}catch{return false;}}return /^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(this.url)&&!!this.key&&!this.key.startsWith('sb_secret_');}
@@ -27,13 +27,17 @@ class DashboardCloud {
   if(!this.session)throw Error('Сначала войдите в аккаунт.');
   if(!this.session.expires_at||this.session.expires_at<Date.now()/1000+60){const refreshed=await this.request('/auth/v1/token?grant_type=refresh_token',{method:'POST',body:{refresh_token:this.session.refresh_token}});this.remember({...refreshed,needs_password:!!this.needsPassword});}
   // Never trust a user ID from local storage or a decoded, unverified JWT.
-  this.user=await this.request('/auth/v1/user');
+  if(this.verifiedToken!==this.session.access_token||!this.user){this.user=await this.request('/auth/v1/user');this.verifiedToken=this.session.access_token;}
  }
  async login(email,password){const session=await this.request('/auth/v1/token?grant_type=password',{method:'POST',body:{email,password}});this.remember(session);await this.authorize();}
  async password(password){await this.authorize();await this.request('/auth/v1/user',{method:'PUT',body:{password}});this.needsPassword=false;this.remember({...this.session,needs_password:false});}
  async reset(email){await this.request('/auth/v1/recover?redirect_to='+encodeURIComponent(location.origin+location.pathname),{method:'POST',body:{email}});}
- async logout(){try{if(this.session)await this.request('/auth/v1/logout',{method:'POST'});}finally{this.session=null;this.user=null;this.revision=null;sessionStorage.removeItem(this.sessionKey);}}
- async load(){await this.authorize();const rows=await this.request('/rest/v1/dashboards?user_id=eq.'+encodeURIComponent(this.user.id)+'&select=payload,revision');if(rows.length){this.revision=rows[0].revision;return rows[0].payload;}this.revision=null;return null;}
+ async logout(){try{if(this.session)await this.request('/auth/v1/logout',{method:'POST'});}finally{this.session=null;this.user=null;this.revision=null;this.verifiedToken=null;sessionStorage.removeItem(this.sessionKey);}}
+ async load({onlyIfChanged=false}={}){
+  await this.authorize();const path='/rest/v1/dashboards?user_id=eq.'+encodeURIComponent(this.user.id);
+  if(onlyIfChanged){const rows=await this.request(path+'&select=revision');const revision=rows[0]?.revision??null;if(revision===this.revision)return undefined;if(!rows.length){this.revision=null;return null;}}
+  const rows=await this.request(path+'&select=payload,revision');if(rows.length){this.revision=rows[0].revision;return rows[0].payload;}this.revision=null;return null;
+ }
  async save(payload){
   await this.authorize();
   const insert=this.revision===null;

@@ -174,10 +174,10 @@ function accountUI() {
  $('#migration-info').textContent=localCount?'Найдено '+localCount+' локальных задач. Нажмите кнопку выше, чтобы добавить их в аккаунт. Облачные задачи и локальная копия сохранятся.':'В этом браузере локальных задач нет. Можно создать новые задачи или восстановить JSON через «Импорт / экспорт». Для переноса с другого браузера сначала скачайте там резервную копию.';
  const footer=$('.sidebar-bottom');footer.textContent=cloudMode?'Личное облачное пространство':'Данные на этом устройстве';
 }
-async function loadCloud() {
+async function loadCloud(onlyIfChanged=false) {
  if(writeBusy)throw Error('Дождитесь сохранения.');
  cloudLoading=true;const epoch=accountEpoch;
- try { const loaded=await cloud.load();if(epoch!==accountEpoch||!cloudMode)return;data=loaded?validate(loaded):initial();category=null;view='all';render();setSync('Облачные данные загружены. Изменения будут сохраняться в вашем аккаунте.'); }
+ try { const loaded=await cloud.load({onlyIfChanged});if(epoch!==accountEpoch||!cloudMode||loaded===undefined)return;data=loaded?validate(loaded):initial();category=null;view='all';render();setSync('Облачные данные загружены. Изменения будут сохраняться в вашем аккаунте.'); }
  catch(error){if(epoch===accountEpoch)throw error;}
  finally {if(epoch===accountEpoch)cloudLoading=false;}
 }
@@ -232,4 +232,4 @@ async function initializeCloud(){
 render();if(storageBlocked)toast('Не удалось прочитать сохранённые данные. Исходное хранилище защищено от перезаписи.');
 initializeCloud();
 // Refresh only when no form is open or being edited; do not replace unsaved drafts.
-setInterval(async()=>{if(!cloudMode||writeBusy||cloudLoading||document.hidden||$('dialog[open]')||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;try{await loadCloud();}catch(error){setSync('Не удалось обновить облачные данные: '+error.message);}},30000);
+setInterval(async()=>{if(!cloudMode||writeBusy||cloudLoading||document.hidden||$('dialog[open]')||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;try{await loadCloud(true);}catch(error){setSync('Не удалось обновить облачные данные: '+error.message);}},30000);
