@@ -1,5 +1,5 @@
 'use strict';
-const CACHE='poryadok-shell-v1';
+const CACHE='poryadok-shell-v2';
 const ROOT=new URL('./',self.location.href);
 const FILES=['./','index.html','style.css','app.js','cloud.js','config.js','install.js','security-check.js','manifest.webmanifest','icons/icon-192.png','icons/icon-512.png','icons/apple-touch-icon.png'];
 const PATHS=new Set(FILES.map(file=>new URL(file,ROOT).pathname));

@@ -5,12 +5,14 @@ let cloudMode=false, writeBusy=false, cloudLoading=false, accountEpoch=0;
 const $ = s => document.querySelector(s);
 const priorities = {high:'Высокий',medium:'Средний',low:'Низкий'};
 const statuses = {todo:'К выполнению',progress:'В работе',waiting:'Ожидаю ответа',done:'Завершена'};
-const viewNames = {all:'Все задачи',today:'Мой день',incoming:'Входящие',done:'Завершённые'};
+const viewNames = {all:'Все задачи',today:'Мой день',incoming:'Входящие',attention:'Требуют внимания',waiting:'Ожидаем ответа',done:'Завершённые'};
 const workspaceNames={work:'Рабочее',personal:'Личное'};
 let workspace='work';
 try{const chosen=new URLSearchParams(location.search).get('workspace')||localStorage.getItem('poryadok.workspace.v1');if(Object.hasOwn(workspaceNames,chosen))workspace=chosen;}catch{}
 const colors = ['#be9561','#8894b9','#619e86','#be8593','#7d9eaf'];
-const initial = () => ({version:1,categories:[{id:'inbox',name:'Без категории',workspace:'work'},{id:'suppliers',name:'Заказы поставщикам',workspace:'work'},{id:'learning',name:'Обучение и презентации',workspace:'work'},{id:'work',name:'Рабочие задачи',workspace:'work'},{id:'personal',name:'Личные дела',workspace:'personal'},{id:'home',name:'Дом и семья',workspace:'personal'},{id:'health',name:'Здоровье',workspace:'personal'},{id:'self-learning',name:'Развитие',workspace:'personal'}],tasks:[]});
+const arrowIcon='<svg viewBox="0 0 24 24" aria-hidden="true" class="icon"><path d="M6 18 18 6M6 6h12v12"/></svg>';
+const brandColors=['sage','violet','amber','blue','rose','cyan','slate'];
+const initial = () => ({version:1,categories:[{id:'inbox',name:'Общие задачи',workspace:'work',color:'slate'},{id:'personal',name:'Личные дела',workspace:'personal'},{id:'home',name:'Дом и семья',workspace:'personal'},{id:'health',name:'Здоровье',workspace:'personal'},{id:'self-learning',name:'Развитие',workspace:'personal'}],tasks:[]});
 const uid = () => crypto.randomUUID();
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -18,7 +20,7 @@ function validate(data) {
   if (!data || data.version !== 1 || !Array.isArray(data.categories) || !Array.isArray(data.tasks) || !data.categories.length || data.categories.length > 501 || data.tasks.length > 50000) throw Error('Неверный формат резервной копии');
   data=structuredClone(data);
   const cats = new Set(), ids = new Set();
-  for (const c of data.categories) { if (!c || typeof c.id !== 'string' || !c.id || cats.has(c.id) || typeof c.name !== 'string' || !c.name.trim() || c.name.length>80) throw Error('Неверные категории'); if(c.workspace!==undefined&&!Object.hasOwn(workspaceNames,c.workspace))throw Error('Неверный раздел категории');c.workspace=c.workspace||(c.id==='personal'?'personal':'work');cats.add(c.id); }
+  for (const c of data.categories) { if (!c || typeof c.id !== 'string' || !c.id || cats.has(c.id) || typeof c.name !== 'string' || !c.name.trim() || c.name.length>80) throw Error('Неверные категории'); if(c.workspace!==undefined&&!Object.hasOwn(workspaceNames,c.workspace))throw Error('Неверный раздел категории');c.workspace=c.workspace||(c.id==='personal'?'personal':'work');if(c.color!==undefined&&!brandColors.includes(c.color))throw Error('Неверный цвет бренда');if(c.description!==undefined&&(typeof c.description!=='string'||c.description.length>300))throw Error('Неверное описание бренда');cats.add(c.id); }
   if (!data.categories.some(c=>c.workspace==='personal')){let id='personal';while(cats.has(id))id+='-new';data.categories.push({id,name:'Личные дела',workspace:'personal'});cats.add(id);}
   if(data.categories.length>501)throw Error('Превышен лимит категорий');
   if (!cats.has('inbox') || data.categories.find(c=>c.id==='inbox').workspace!=='work') throw Error('Нет категории входящих');
@@ -26,6 +28,7 @@ function validate(data) {
     if (!t || typeof t.id !== 'string' || !t.id || ids.has(t.id) || typeof t.title !== 'string' || !t.title.trim() || t.title.length>200 || !cats.has(t.category) || !Object.hasOwn(priorities,t.priority) || !Object.hasOwn(statuses,t.status) || !['self','incoming','bitrix'].includes(t.source) || typeof t.description !== 'string' || t.description.length>10000 || typeof t.link !== 'string' || (t.link && !/^https?:\/\//i.test(t.link)) || typeof t.due !== 'string' || (t.due && (!/^\d{4}-\d{2}-\d{2}$/.test(t.due) || Number.isNaN(Date.parse(t.due)))) || !Array.isArray(t.history)) throw Error('Неверные данные задачи');
     const taskWorkspace=data.categories.find(c=>c.id===t.category).workspace;
     if(t.workspace!==undefined&&t.workspace!==taskWorkspace)throw Error('Раздел задачи не совпадает с категорией');t.workspace=taskWorkspace;
+    if(t.dueTime!==undefined&&(typeof t.dueTime!=='string'||(t.dueTime&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(t.dueTime))))throw Error('Неверное время срока');if(t.dueTime&&!t.due)throw Error('Время срока требует дату');t.dueTime=t.dueTime||'';
     ids.add(t.id);
     for (const h of t.history) if (!h || typeof h.text !== 'string' || h.text.length>10000 || !['note','system'].includes(h.kind) || typeof h.at !== 'string' || Number.isNaN(Date.parse(h.at))) throw Error('Неверная хронология');
   }
@@ -33,7 +36,8 @@ function validate(data) {
 }
 let data = initial(), storageBlocked = false;
 try { const stored = localStorage.getItem(KEY); if (stored) data = validate(JSON.parse(stored)); } catch { storageBlocked = true; }
-let view='all', category=null, layout='groups', edited=null, toastTimer;
+let view='all', category=null, layout='groups', edited=null, toastTimer, categoryEdited=null;
+try{const saved=localStorage.getItem('poryadok.layout.v1');if(['groups','list'].includes(saved))layout=saved;}catch{}
 function toast(message) { $('#toast').textContent=message; $('#toast').hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('#toast').hidden=true,6000); }
 async function commit(next) {
   try{next=validate(next);}catch(error){toast(error.message);return false;}
@@ -55,63 +59,84 @@ function spaceCategories(scope=workspace){return data.categories.filter(c=>c.wor
 function defaultCategory(scope=workspace){return (scope==='work'?data.categories.find(c=>c.id==='inbox'):spaceCategories(scope)[0]).id;}
 function categoryOptions(scope=workspace){return spaceCategories(scope).map(c=>`<option value="${escapeHTML(c.id)}">${escapeHTML(c.name)}</option>`).join('');}
 function taskWorkspaceOptions(scope,selected){$('#task-category').innerHTML=categoryOptions(scope);$('#task-category').value=spaceCategories(scope).some(c=>c.id===selected)?selected:defaultCategory(scope);}
+function overdue(t){return t.status!=='done'&&!!t.due&&(t.due<today()||(t.due===today()&&!!t.dueTime&&t.dueTime<new Date().toTimeString().slice(0,5)));}
+function attention(t){return t.status!=='done'&&(t.priority==='high'||overdue(t));}
+function lastUpdate(t){return t.history.reduce((at,h)=>Math.max(at,Date.parse(h.at)||0),0);}
+function taskMatches(t,q){return (t.title+' '+t.description+' '+t.history.map(h=>h.text).join(' ')+' '+(data.categories.find(c=>c.id===t.category)?.name||'')).toLocaleLowerCase().includes(q);}
+function compareTasks(a,b){
+ const priority={high:0,medium:1,low:2},date=t=>(t.due||'9999-12-31')+'T'+(t.dueTime||'23:59'),order=$('#sort-order').value;
+ if(a.status==='done'&&b.status!=='done')return 1;if(b.status==='done'&&a.status!=='done')return -1;
+ if(order==='updated')return lastUpdate(b)-lastUpdate(a)||a.title.localeCompare(b.title,'ru');
+ return (order==='due'?date(a).localeCompare(date(b))||priority[a.priority]-priority[b.priority]:priority[a.priority]-priority[b.priority]||date(a).localeCompare(date(b)))||a.title.localeCompare(b.title,'ru');
+}
 function visibleTasks() {
- const q=$('#search').value.toLocaleLowerCase(), p=$('#priority-filter').value;
- return spaceTasks().filter(t => (view==='done' ? t.status==='done' : t.status!=='done') && (view!=='today'||t.due===today()) && (view!=='incoming'||t.source!=='self') && (!category||t.category===category) && (p==='all'||t.priority===p) && (t.title+' '+t.description+' '+t.history.map(h=>h.text).join(' ')).toLocaleLowerCase().includes(q)).sort((a,b)=>({high:0,medium:1,low:2}[a.priority]-{high:0,medium:1,low:2}[b.priority]) || (a.due||'9999').localeCompare(b.due||'9999'));
+ const q=$('#search').value.trim().toLocaleLowerCase(),p=$('#priority-filter').value,status=$('#status-filter').value,done=$('#show-completed').checked;
+ return spaceTasks().filter(t=>(view==='done'?t.status==='done':done||t.status!=='done')&&(view!=='today'||t.due===today())&&(view!=='incoming'||t.source!=='self')&&(view!=='attention'||attention(t))&&(view!=='waiting'||t.status==='waiting')&&(!category||t.category===category)&&(p==='all'||t.priority===p)&&(status==='all'||view==='done'||t.status===status)&&taskMatches(t,q)).sort(compareTasks);
 }
-function card(t) {
- return `<article class="task-card ${t.status==='done'?'done':''}" data-task="${escapeHTML(t.id)}" tabindex="0" role="button" aria-label="Открыть задачу: ${escapeHTML(t.title)}"><div class="card-top"><span class="badge ${t.priority}">${priorities[t.priority]} приоритет</span><span class="more">···</span></div><div class="task-title"><button class="check ${t.status==='done'?'checked':''}" data-complete="${escapeHTML(t.id)}" aria-label="${t.status==='done'?'Вернуть в работу':'Завершить'}: ${escapeHTML(t.title)}">${t.status==='done'?'✓':''}</button><h3>${escapeHTML(t.title)}</h3></div><p>${escapeHTML(t.description || (t.source==='bitrix'?'Из Битрикс24':t.source==='incoming'?'Входящая задача':'Поставил себе'))}</p><div class="card-bottom"><span class="${t.due && t.due<today() && t.status!=='done'?'overdue':''}">◷ ${dueLabel(t.due)}${t.due && t.due<today() && t.status!=='done'?' · просрочена':''}</span><span>♧ ${t.history.filter(h=>h.kind==='note').length}</span><span class="status ${t.status}">${statuses[t.status]}</span></div></article>`;
-}
-function render() {
- document.body.dataset.workspace=workspace;
- $('meta[name=theme-color]').content=workspace==='work'?'#29785a':'#786098';
- $('.workspace b').textContent=workspaceNames[workspace];
- $('#space-breadcrumb').textContent=workspaceNames[workspace];
- $('#space-description').textContent=workspace==='work'?'Заказы, встречи и рабочие задачи — в одном месте.':'Планы, забота о себе и личные дела — в своём ритме.';
+function initials(name){name=name.replace(/^\[Демо\]\s*/,'');return (name.trim().split(/\s+/).length>1?name.trim().split(/\s+/).slice(0,2).map(s=>[...s][0]).join(''):[...name].slice(0,2).join('')).toUpperCase();}
+function brandColor(c){return c.color||brandColors[Math.max(0,data.categories.findIndex(x=>x.id===c.id))%brandColors.length];}
+function brandStats(c){const tasks=spaceTasks().filter(t=>t.category===c.id),active=tasks.filter(t=>t.status!=='done');return {tasks,active,done:tasks.length-active.length,attention:active.filter(attention).length,waiting:active.filter(t=>t.status==='waiting').length,next:active.filter(t=>t.due).sort((a,b)=>(a.due+'T'+(a.dueTime||'23:59')).localeCompare(b.due+'T'+(b.dueTime||'23:59')))[0]};}
+function brandTile(c){const stats=brandStats(c),ratio=stats.tasks.length?Math.round(stats.done/stats.tasks.length*100):0;return `<button class="brand-tile tone-${brandColor(c)} ${category===c.id?'selected':''}" data-brand="${escapeHTML(c.id)}" aria-expanded="${category===c.id}" aria-controls="brand-detail" aria-label="Открыть ${workspace==='work'?'бренд':'категорию'} ${escapeHTML(c.name)}"><span class="brand-tile-top"><span class="brand-avatar">${escapeHTML(initials(c.name))}</span><span class="brand-signal ${stats.attention?'signal-attention':''}">${stats.attention?'⚑ '+stats.attention+' · внимание':stats.active.length?'● Всё спокойно':'○ Нет активных'}</span><span class="brand-arrow">${arrowIcon}</span></span><span class="brand-tile-name">${escapeHTML(c.name)}</span><span class="brand-tile-description">${escapeHTML(c.description||'Задачи и история работы по направлению')}</span><span class="brand-numbers"><span><b>${stats.active.length}</b> активных</span><span><b>${stats.waiting}</b> ожидают</span><span><b>${stats.done}</b> готово</span></span><span class="brand-progress"><span style="width:${ratio}%"></span></span><span class="brand-tile-bottom"><span>${stats.tasks.length?ratio+'% задач завершено':'Добавьте первую задачу'}</span><span class="${stats.next&&overdue(stats.next)?'overdue':''}">${stats.next?'◷ '+dueLabel(stats.next.due):'Без ближайшего срока'}</span></span></button>`;}
+function card(t){const c=data.categories.find(c=>c.id===t.category);return `<article class="task-card ${t.status==='done'?'done':''} ${overdue(t)?'late-task':''}" data-task="${escapeHTML(t.id)}" tabindex="0" role="button" aria-label="Открыть задачу: ${escapeHTML(t.title)}"><button class="check ${t.status==='done'?'checked':''}" data-complete="${escapeHTML(t.id)}" aria-label="${t.status==='done'?'Вернуть в работу':'Завершить'}: ${escapeHTML(t.title)}">${t.status==='done'?'✓':''}</button><div class="task-copy"><h3>${escapeHTML(t.title)}</h3><p>${escapeHTML(t.description||'Откройте задачу, чтобы добавить детали и заметки')}</p><div class="task-meta"><span class="task-brand tone-${brandColor(c)}">${escapeHTML(c.name)}</span><span>☷ ${t.history.filter(h=>h.kind==='note').length} записей</span></div></div><div class="task-pills"><span class="badge ${t.priority}">${priorities[t.priority]}</span><span class="status ${t.status}">${statuses[t.status]}</span></div><div class="task-deadline ${overdue(t)?'overdue':''}"><span>◷ ${dueLabel(t.due)}</span>${t.dueTime?'<small>'+escapeHTML(t.dueTime)+'</small>':''}${overdue(t)?'<small>Просрочена</small>':''}</div><span class="task-open">${arrowIcon}</span></article>`;}
+function render(){
+ document.body.dataset.workspace=workspace;document.title=workspace==='work'?'Порядок — портфель брендов':'Порядок — личный планировщик';$('meta[name=theme-color]').content=workspace==='work'?'#1f433b':'#786098';$('.workspace b').textContent=workspaceNames[workspace];$('#space-breadcrumb').textContent=workspaceNames[workspace];
+ $('#space-description').textContent=workspace==='work'?'Все направления, приоритеты и следующие шаги — на одном экране.':'Дом, здоровье и личные планы — в своём ритме.';
+ $('#all-view-label').textContent=workspace==='work'?'Бренды и задачи':'Категории и задачи';$('.tabs [data-layout=groups]').textContent=workspace==='work'?'▦ Обзор брендов':'▦ Обзор категорий';$('.brand-detail-note').hidden=workspace==='personal';
+ $('#page-kicker').textContent=workspace==='work'?'ВАШ ПОРТФЕЛЬ ПОД КОНТРОЛЕМ':'ПРОСТРАНСТВО ДЛЯ СЕБЯ';$('#category-nav-label').textContent=workspace==='work'?'БРЕНДЫ И НАПРАВЛЕНИЯ':'ЛИЧНЫЕ КАТЕГОРИИ';$('#create-brand').textContent=workspace==='work'?'＋ Добавить бренд':'＋ Добавить категорию';
  document.querySelectorAll('#workspace-switch [data-workspace]').forEach(b=>{b.classList.toggle('selected',b.dataset.workspace===workspace);b.setAttribute('aria-pressed',String(b.dataset.workspace===workspace));});
- const active=spaceTasks().filter(t=>t.status!=='done');
- $('#all-count').textContent=active.length;
- $('#stat-active').textContent=active.length;
- $('#stat-high').textContent=active.filter(t=>t.priority==='high').length;
- $('#stat-today').textContent=active.filter(t=>t.due===today()).length;
- $('#stat-done').textContent=spaceTasks().length-active.length;
- const title=category?data.categories.find(c=>c.id===category)?.name:view==='all'?(workspace==='work'?'Рабочий дашборд':'Личный планировщик'):viewNames[view];
- $('#page-title').innerHTML=escapeHTML(title)+'<span class="title-dot">.</span>';
- $('#breadcrumb-view').textContent=title;
- $('#categories').innerHTML=spaceCategories().map((c,i)=>`<button data-category="${escapeHTML(c.id)}" class="${category===c.id?'active':''}"><i class="dot" style="background:${colors[i%colors.length]};margin:0"></i>${escapeHTML(c.name)}</button>`).join('');
- document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',!category&&b.dataset.view===view));
- const tasks=visibleTasks();
- $('#task-groups').classList.toggle('list-layout',layout==='list');
- if (!tasks.length) { $('#task-groups').innerHTML=`<div class="empty">${spaceTasks().length?'Задач по этим условиям пока нет.':'Начните с одной задачи — запишите её в строке выше.'}${!spaceTasks().length?'<br><button id="examples" class="plain" style="margin-top:15px">Посмотреть на примере демозадач</button>':''}</div>`; return; }
- const groups=layout==='list'?[{name:'Задачи',tasks}]:spaceCategories().map(c=>({...c,tasks:tasks.filter(t=>t.category===c.id)})).filter(c=>c.tasks.length);
- $('#task-groups').innerHTML=groups.map((c,i)=>`<section class="task-group"><div class="group-heading"><i class="dot" style="background:${colors[(c.id?data.categories.findIndex(x=>x.id===c.id):0)%colors.length]}"></i><h2>${escapeHTML(c.name)}</h2><span class="group-count">${c.tasks.length}</span><button data-add="${escapeHTML(c.id||category||defaultCategory())}">＋ Добавить</button></div><div class="cards">${c.tasks.map(card).join('')}</div></section>`).join('');
+ const all=spaceTasks(),active=all.filter(t=>t.status!=='done');$('#all-count').textContent=active.length;$('#stat-active').textContent=active.length;$('#stat-high').textContent=active.filter(attention).length;$('#stat-today').textContent=active.filter(t=>t.due===today()).length;$('#stat-done').textContent=all.length-active.length;
+ const title=category?data.categories.find(c=>c.id===category)?.name:view==='all'?(workspace==='work'?'Портфель брендов':'Личный планировщик'):viewNames[view];$('#page-title').textContent=layout==='groups'&&view==='all'?(workspace==='work'?'Портфель брендов':'Личный планировщик'):title;$('#breadcrumb-view').textContent=title;
+ $('#categories').innerHTML=spaceCategories().map(c=>`<button data-category="${escapeHTML(c.id)}" class="${category===c.id?'active':''}"><i class="dot tone-dot-${brandColor(c)}"></i><span>${escapeHTML(c.name)}</span><small>${active.filter(t=>t.category===c.id).length}</small></button>`).join('');
+ document.querySelectorAll('[data-view]').forEach(b=>b.classList.toggle('active',!category&&b.dataset.view===view));document.querySelectorAll('[data-layout]').forEach(b=>b.classList.toggle('selected',b.dataset.layout===layout));
+ const previousQuick=$('#quick-category').value;$('#quick-category').innerHTML=categoryOptions();$('#quick-category').value=category||((spaceCategories().some(c=>c.id===previousQuick))?previousQuick:defaultCategory());$('#quick-new-brand').textContent=workspace==='work'?'＋ Создать бренд':'＋ Создать категорию';
+ const overview=layout==='groups'&&view==='all';$('#brand-overview').hidden=!overview;
+ const q=$('#search').value.trim().toLocaleLowerCase(),p=$('#priority-filter').value;
+ const brands=spaceCategories().filter(c=>(c.name.toLocaleLowerCase().includes(q)||all.some(t=>t.category===c.id&&taskMatches(t,q)))&&(p==='all'||all.some(t=>t.category===c.id&&t.priority===p))).sort((a,b)=>brandStats(b).attention-brandStats(a).attention||brandStats(b).active.length-brandStats(a).active.length||a.name.localeCompare(b.name,'ru'));
+ $('#brands-heading').innerHTML=(workspace==='work'?'Бренды и направления':'Личные категории')+' <span class="group-count">'+brands.length+'</span>';
+ $('#demo-overview').hidden=all.length>0;
+ $('#brand-grid').innerHTML=brands.length?brands.map(brandTile).join(''):'<div class="empty">Ничего не найдено. Попробуйте изменить поиск или добавьте новый бренд.</div>';
+ const focus=active.filter(t=>t.due||t.priority==='high').sort((a,b)=>{const rank=t=>overdue(t)?0:t.due===today()?1:t.priority==='high'?2:3;return rank(a)-rank(b)||(a.due||'9999').localeCompare(b.due||'9999')||({high:0,medium:1,low:2}[a.priority]-{high:0,medium:1,low:2}[b.priority]);}).slice(0,3);
+ $('#focus-tasks').innerHTML=focus.length?focus.map(t=>`<button data-task="${escapeHTML(t.id)}"><span class="focus-task-title">${escapeHTML(t.title)}</span><span class="${overdue(t)?'overdue':''}">${dueLabel(t.due)}${t.dueTime?' · '+escapeHTML(t.dueTime):''}</span></button>`).join(''):'<div class="focus-empty">Нет срочных задач.<br>Укажите сроки и приоритеты — ближайшие шаги появятся здесь.</div>';
+ $('#portfolio-pulse').innerHTML=`<span class="pulse-dot"></span><div><b>${active.filter(t=>t.status==='waiting').length} задач ожидают ответа</b><small>Фиксируйте договорённости в журнале задачи.</small></div>`;
+ $('#brand-detail').hidden=!category;if(category){const c=data.categories.find(c=>c.id===category),stats=brandStats(c);$('#brand-detail-heading').innerHTML=`<div class="brand-avatar tone-${brandColor(c)}">${escapeHTML(initials(c.name))}</div><div><span class="section-kicker">${workspace==='work'?'КАРТОЧКА БРЕНДА':'ЛИЧНАЯ КАТЕГОРИЯ'}</span><h2>${escapeHTML(c.name)}</h2><p>${escapeHTML(c.description||'Все задачи и договорённости по этому направлению.')}</p></div><div class="detail-summary"><b>${stats.active.length}</b><span>активных задач</span></div>`;$('#edit-brand').textContent=workspace==='work'?'Изменить бренд':'Изменить категорию';}
+ const showTasks=!overview||!!category;$('#task-list-controls').hidden=!showTasks;$('#task-groups').hidden=!showTasks;
+ $('#show-completed').disabled=view==='done';if(view==='done')$('#show-completed').checked=true;
+ const tasks=visibleTasks();$('#task-list-count').textContent=tasks.length;$('#task-list-title').textContent=category?(workspace==='work'?'Задачи бренда':'Задачи категории'):view==='done'?'Завершённые задачи':'Список задач';
+ $('#task-groups').innerHTML=tasks.length?'<div class="cards">'+tasks.map(card).join('')+'</div>':'<div class="empty"><span class="empty-symbol">✓</span><h3>Здесь пока нет задач</h3><p>Добавьте новую задачу или измените фильтры.</p><button class="secondary" data-add="'+escapeHTML(category||defaultCategory())+'">＋ Добавить задачу</button>'+(!all.length?'<button id="examples" class="text-button">Посмотреть демопример</button>':'')+'</div>';
 }
+function revealBrand(id){category=category===id?null:id;view='all';layout='groups';$('#show-completed').checked=false;$('#status-filter').value='all';render();if(category)requestAnimationFrame(()=>$('#brand-detail').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'}));}
 function openTask(id=null,cat=null) {
  edited=id; const t=data.tasks.find(t=>t.id===id); const form=$('#task-form'); form.reset();
  $('#dialog-title').textContent=t?'Детали задачи':'Новая задача';
  form.elements.workspace.value=t?.workspace||workspace;
  taskWorkspaceOptions(form.elements.workspace.value,t?.category||category);
- if(t) for(const name of ['title','category','priority','due','source','status','description','link']) form.elements[name].value=t[name];
+ if(t) for(const name of ['title','category','priority','due','dueTime','source','status','description','link']) form.elements[name].value=t[name]||'';
  else { form.elements.category.value=cat||category||defaultCategory(); if(view==='today') form.elements.due.value=today(); if(view==='incoming') form.elements.source.value='incoming'; }
+ $('#task-category-caption').textContent=form.elements.workspace.value==='work'?'Бренд / направление':'Категория';$('#task-external').hidden=!t?.link;if(t?.link)$('#task-external').href=t.link;
  $('#completion-actions').hidden=!t||t.status==='done'; $('#delete-task').hidden=!t; $('#history-section').hidden=!t; $('#note-text').value=''; renderHistory(); $('#task-dialog').showModal(); form.elements.title.focus();
 }
 const recordNames={note:'Заметка',report:'Отчёт о работе',change:'Уточнение / правка'};
 function renderHistory() { const t=data.tasks.find(t=>t.id===edited); $('#history').innerHTML=(t?.history||[]).map(h=>`<div class="event ${h.kind}"><time>${h.kind==='note'?escapeHTML(recordNames[h.recordType]||'Заметка')+' · ':''}${escapeHTML(new Date(h.at).toLocaleString('ru-RU'))}</time>${escapeHTML(h.text)}</div>`).join(''); }
 function switchWorkspace(scope){
- workspace=scope;view='all';category=null;$('#search').value='';$('#priority-filter').value='all';
+ workspace=scope;view='all';category=null;$('#show-completed').checked=false;$('#status-filter').value='all';$('#search').value='';$('#priority-filter').value='all';
  try{localStorage.setItem('poryadok.workspace.v1',scope);}catch{}
  const url=new URL(location.href);url.searchParams.set('workspace',scope);history.replaceState(null,'',url.pathname+url.search+url.hash);render();
 }
 $('#workspace-switch').onclick=e=>{const button=e.target.closest('[data-workspace]');if(button)switchWorkspace(button.dataset.workspace);};
 $('#task-form [name=workspace]').onchange=e=>taskWorkspaceOptions(e.target.value);
 $('#current-date').textContent=new Date().toLocaleDateString('ru-RU',{weekday:'long',day:'numeric',month:'long'});
-$('#views').onclick=e=>{const b=e.target.closest('[data-view]');if(b){view=b.dataset.view;category=null;render();}};
-$('#categories').onclick=e=>{const b=e.target.closest('[data-category]');if(b){category=b.dataset.category;view='all';render();}};
-$('.stats').onclick=e=>{const b=e.target.closest('[data-stat]');if(b){view=b.dataset.stat==='high'?'all':b.dataset.stat;category=null;$('#priority-filter').value=b.dataset.stat==='high'?'high':'all';render();}};
-$('.tabs').onclick=e=>{const b=e.target.closest('[data-layout]');if(b){layout=b.dataset.layout;document.querySelectorAll('[data-layout]').forEach(x=>x.classList.toggle('selected',x===b));render();}};
+$('#views').onclick=e=>{const b=e.target.closest('[data-view]');if(b){view=b.dataset.view;category=null;$('#show-completed').checked=view==='done';$('#status-filter').value='all';render();}};
+$('#categories').onclick=e=>{const b=e.target.closest('[data-category]');if(b)revealBrand(b.dataset.category);};
+$('.stats').onclick=e=>{const b=e.target.closest('[data-stat]');if(b){view=b.dataset.stat;category=null;$('#priority-filter').value='all';$('#status-filter').value='all';$('#show-completed').checked=view==='done';render();}};
+$('.tabs').onclick=e=>{const b=e.target.closest('[data-layout]');if(b){layout=b.dataset.layout;try{localStorage.setItem('poryadok.layout.v1',layout);}catch{}category=null;view='all';$('#show-completed').checked=false;render();}};
+$('#demo-overview').onclick=()=>seedExamples();
+$('#brand-grid').onclick=e=>{const b=e.target.closest('[data-brand]');if(b)revealBrand(b.dataset.brand);};
+$('#focus-tasks').onclick=e=>{const b=e.target.closest('[data-task]');if(b)openTask(b.dataset.task);};
+$('#back-portfolio').onclick=()=>{category=null;view='all';layout='groups';render();$('#brand-overview').scrollIntoView({block:'start'});};
+$('#status-filter').onchange=render;$('#sort-order').onchange=render;$('#show-completed').onchange=render;
 $('#search').oninput=render; $('#priority-filter').onchange=render;
 $('#new-task').onclick=()=>openTask(); $('#close-dialog').onclick=()=>$('#task-dialog').close();
-$('#quick-form').onsubmit=async e=>{e.preventDefault();const title=$('#quick-title').value.trim();if(!title)return;const task={id:uid(),title,category:category||defaultCategory(),workspace,priority:'medium',due:view==='today'?today():'',source:view==='incoming'?'incoming':'self',status:'todo',description:'',link:'',history:[event('Задача создана')]};if(await update(n=>n.tasks.push(task))){$('#quick-form').reset();if(view==='done'){view='all';render();}toast('Задача добавлена');}};
+$('#quick-form').onsubmit=async e=>{e.preventDefault();const title=$('#quick-title').value.trim();if(!title)return;const target=$('#quick-category').value;const task={id:uid(),title,category:target,workspace,priority:'medium',due:view==='today'?today():'',source:view==='incoming'?'incoming':'self',status:'todo',description:'',link:'',history:[event('Задача создана')]};if(await update(n=>n.tasks.push(task))){$('#quick-title').value='';if(category&&category!==target)revealBrand(target);if(view==='done'){view='all';$('#show-completed').checked=false;render();}toast('Задача добавлена');}};
 async function handleTasks(e) {
  const check=e.target.closest('[data-complete]');if(check){const task=data.tasks.find(t=>t.id===check.dataset.complete);if(task.status!=='done'&&!confirm('Завершить задачу «'+task.title+'»? Она перейдёт в раздел «Завершённые».'))return;await update(n=>{const t=n.tasks.find(t=>t.id===check.dataset.complete);t.status=t.status==='done'?'todo':'done';t.history.push(event(t.status==='done'?'Задача завершена':'Задача возвращена в работу'));});return;}
  const add=e.target.closest('[data-add]');if(add){openTask(null,add.dataset.add);return;}
@@ -122,8 +147,8 @@ $('#task-groups').onclick=handleTasks;
 $('#task-groups').onkeydown=e=>{if(e.target.matches('[data-task]')&&['Enter',' '].includes(e.key)){e.preventDefault();openTask(e.target.dataset.task);}};
 async function saveTask(complete=false) {
  const f=$('#task-form');if(!f.reportValidity())return;
- const fields={};for(const name of ['title','category','workspace','priority','due','source','status','description','link'])fields[name]=f.elements[name].value.trim();
- if(complete)fields.status='done';
+ const fields={};for(const name of ['title','category','workspace','priority','due','dueTime','source','status','description','link'])fields[name]=f.elements[name].value.trim();
+ if(complete)fields.status='done';if(fields.dueTime&&!fields.due){toast('Для времени срока укажите дату.');return;}
  if(!fields.title)return;
  if(fields.link&&!/^https?:\/\//i.test(fields.link)){toast('Для ссылки используйте http:// или https://');return;}
  const current=data.tasks.find(t=>t.id===edited);
@@ -135,9 +160,10 @@ $('#task-form').onsubmit=async e=>{e.preventDefault();await saveTask();};
 $('#complete-task').onclick=()=>saveTask(true);
 $('#note-form').onsubmit=async e=>{e.preventDefault();const text=$('#note-text').value.trim();if(!text)return;if(await update(n=>n.tasks.find(t=>t.id===edited).history.push({...event(text,'note'),recordType:$('#note-kind').value}))){$('#note-text').value='';renderHistory();toast('Заметка добавлена');}};
 $('#delete-task').onclick=async()=>{if(confirm('Удалить задачу и всю её хронологию?'))if(await update(n=>n.tasks=n.tasks.filter(t=>t.id!==edited))){$('#task-dialog').close();toast('Задача удалена');}};
-$('#add-category').onclick=()=>{$('#category-form').reset();$('#category-dialog').showModal();$('#category-name').focus();};
+function openBrand(id=null){categoryEdited=id;$('#category-form').reset();const c=data.categories.find(c=>c.id===id);$('#category-dialog-title').textContent=id?(workspace==='work'?'Настройки бренда':'Настройки категории'):(workspace==='work'?'Новый бренд':'Новая категория');$('#category-name').value=c?.name||'';$('#category-description').value=c?.description||'';$('#category-color').value=c?brandColor(c):brandColors[spaceCategories().length%brandColors.length];$('#category-dialog').showModal();$('#category-name').focus();}
+$('#quick-new-brand').onclick=()=>openBrand();$('#add-category').onclick=()=>openBrand();$('#create-brand').onclick=()=>openBrand();$('#edit-brand').onclick=()=>openBrand(category);
 $('#close-category').onclick=()=>$('#category-dialog').close();
-$('#category-form').onsubmit=async e=>{e.preventDefault();const name=$('#category-name').value.trim();if(!name)return;if(spaceCategories().some(c=>c.name.toLocaleLowerCase()===name.toLocaleLowerCase())){toast('Такая категория уже есть');return;}if(await update(n=>n.categories.push({id:uid(),name,workspace}))){$('#category-dialog').close();toast('Категория добавлена');}};
+$('#category-form').onsubmit=async e=>{e.preventDefault();const name=$('#category-name').value.trim(),description=$('#category-description').value.trim(),color=$('#category-color').value;if(!name)return;if(spaceCategories().some(c=>c.id!==categoryEdited&&c.name.toLocaleLowerCase()===name.toLocaleLowerCase())){toast('Такое название уже есть в этом планировщике');return;}const editedId=categoryEdited||uid();if(await update(n=>{if(categoryEdited)Object.assign(n.categories.find(c=>c.id===categoryEdited),{name,description,color});else n.categories.push({id:editedId,name,description,color,workspace});})){$('#category-dialog').close();category=null;revealBrand(editedId);toast('Карточка сохранена');}};
 function downloadFile(contents, type, filename) {
  const blob=new Blob([contents],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');
  a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
@@ -149,9 +175,9 @@ function csvCell(value) {
  return '"'+text.replace(/"/g,'""')+'"';
 }
 function csvReport() {
- const header=['Раздел','Задача','Категория','Приоритет','Статус','Срок','Источник','Ссылка на Битрикс24','Описание','Заметки','Полная хронология'];
+ const header=['Раздел','Задача','Бренд / категория','Приоритет','Статус','Срок','Время','Источник','Ссылка на Битрикс24','Описание','Заметки','Полная хронология'];
  const sources={self:'Поставил себе',incoming:'Входящая задача',bitrix:'Из Битрикс24 вручную'};
- const rows=data.tasks.map(t=>[workspaceNames[t.workspace],t.title,data.categories.find(c=>c.id===t.category)?.name||'',priorities[t.priority],statuses[t.status],t.due,sources[t.source],t.link,t.description,t.history.filter(h=>h.kind==='note').map(h=>new Date(h.at).toLocaleString('ru-RU')+' — '+h.text).join('\n'),t.history.map(h=>new Date(h.at).toLocaleString('ru-RU')+' — '+h.text).join('\n')]);
+ const rows=data.tasks.map(t=>[workspaceNames[t.workspace],t.title,data.categories.find(c=>c.id===t.category)?.name||'',priorities[t.priority],statuses[t.status],t.due,t.dueTime||'',sources[t.source],t.link,t.description,t.history.filter(h=>h.kind==='note').map(h=>new Date(h.at).toLocaleString('ru-RU')+' — '+h.text).join('\n'),t.history.map(h=>new Date(h.at).toLocaleString('ru-RU')+' — '+h.text).join('\n')]);
  // UTF-8 BOM lets desktop Excel detect Russian text correctly.
  return '\uFEFF'+[header,...rows].map(row=>row.map(csvCell).join(';')).join('\r\n')+'\r\n';
 }
@@ -161,7 +187,12 @@ $('#export-csv').onclick=()=>{downloadFile(csvReport(),'text/csv;charset=utf-8',
 $('#export').onclick=()=>{downloadFile(JSON.stringify(data,null,2),'application/json;charset=utf-8',`poryadok-backup-${today()}.json`);toast('Резервная копия скачана. Храните её для восстановления.');};
 $('#import').onclick=()=>$('#import-file').click();
 $('#import-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{if(file.size>20000000)throw Error('Файл больше 20 МБ');const next=validate(JSON.parse(await file.text()));if(!confirm(`Восстановить ${next.tasks.length} задач и ${next.categories.length} категорий? Текущие ${data.tasks.length} задач будут заменены. Сначала сохраните экспорт, если они вам нужны.`))return;if(storageBlocked)throw Error('Хранилище повреждено или недоступно. Импорт отменён для защиты исходных данных.');if(await commit(next)){$('#data-dialog').close();category=null;view='all';$('#search').value='';$('#priority-filter').value='all';render();toast('Данные восстановлены');}}catch(error){toast('Импорт отменён: '+error.message);}finally{e.target.value='';}};
-async function seedExamples(){if(spaceTasks().length)return;const examples=[['Согласовать заказ с поставщиком','suppliers','high','progress','Уточнить наличие и получить счёт'],['Проверить сроки поставки','suppliers','medium','waiting','Ожидаю подтверждение от менеджера'],['Подготовить презентацию продукта','learning','high','todo','Собрать ключевые преимущества и примеры'],['Пройти обучение по новому ассортименту','learning','low','todo','Выделить 30 минут на материалы'],['Ответить на запрос клиента','work','medium','todo','Подготовить варианты и условия'],['Записать идеи на следующую неделю','personal','low','todo','Разобрать заметки и выбрать главное']];await update(n=>n.tasks.push(...examples.filter(([,cat])=>data.categories.find(c=>c.id===cat)?.workspace===workspace).map(([title,category,priority,status,description],i)=>({id:uid(),title:'[Демо] '+title,category,workspace,priority,status,description,due:i%2===0?today():'',source:i===4?'incoming':'self',link:'',history:[event('Создана демонстрационная задача')]}))));toast('Добавлены примеры с меткой [Демо]. Их можно удалить в карточке.');}
+async function seedExamples(){
+ if(spaceTasks().length)return;
+ const date=offset=>{const d=new Date();d.setDate(d.getDate()+offset);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+ const samples=workspace==='work'?[['Бренд Альфа','Согласовать заказ поставщику','high','progress',-1],['Бренд Альфа','Подготовить материалы для обучения','medium','todo',2],['Бренд Бета','Уточнить дату отгрузки','high','waiting',0],['Бренд Бета','Обновить карточки на сайте','low','todo',5],['Бренд Гамма','Согласовать презентацию','medium','waiting',3],['Бренд Гамма','Отправить коммерческое предложение','low','done',-2]]:[['Личные дела','Запланировать выходные','medium','todo',3],['Личные дела','Записаться на обследование','high','todo',1]];
+ if(await update(n=>{for(const [name,title,priority,status,offset] of samples){const label='[Демо] '+name;let c=n.categories.find(c=>c.workspace===workspace&&c.name===label);if(!c){c={id:uid(),name:label,workspace,color:brandColors[n.categories.length%brandColors.length]};n.categories.push(c);}n.tasks.push({id:uid(),title:'[Демо] '+title,category:c.id,workspace,priority,status,due:date(offset),dueTime:'',source:'self',description:'Демонстрационная задача. Её можно изменить или удалить.',link:'',history:[event('Создан демонстрационный пример')]});}}))toast('Добавлены демонстрационные примеры с меткой [Демо].');
+}
 function setSync(message) { $('#sync-banner').hidden=!message; $('#sync-banner').textContent=message||''; }
 function accountUI() {
  $('#account-button').textContent=cloudMode?'Мой аккаунт':'Войти';
@@ -177,7 +208,7 @@ function accountUI() {
 async function loadCloud(onlyIfChanged=false) {
  if(writeBusy)throw Error('Дождитесь сохранения.');
  cloudLoading=true;const epoch=accountEpoch;
- try { const loaded=await cloud.load({onlyIfChanged});if(epoch!==accountEpoch||!cloudMode||loaded===undefined)return;data=loaded?validate(loaded):initial();category=null;view='all';render();setSync('Облачные данные загружены. Изменения будут сохраняться в вашем аккаунте.'); }
+ try { const loaded=await cloud.load({onlyIfChanged});if(epoch!==accountEpoch||!cloudMode||loaded===undefined)return;data=loaded?validate(loaded):initial();if(category&&!spaceCategories().some(c=>c.id===category))category=null;render();setSync('Облачные данные загружены. Изменения будут сохраняться в вашем аккаунте.'); }
  catch(error){if(epoch===accountEpoch)throw error;}
  finally {if(epoch===accountEpoch)cloudLoading=false;}
 }
