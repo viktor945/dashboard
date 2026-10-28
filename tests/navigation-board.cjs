@@ -25,7 +25,7 @@ const BASE = process.env.PORYADOK_TEST_URL || 'http://127.0.0.1:8014/';
     assert.equal(await page.evaluate(() => scrollY), 0);
     assert.equal(await page.locator('#brand-overview').isVisible(), false);
     assert.match(await page.locator('#brand-detail-heading').innerText(), /Бренд 27/);
-    await page.locator('#back-portfolio').click();
+    await page.locator('#header-back-portfolio').click();
     assert(Math.abs(await page.evaluate(() => scrollY) - previousScroll) <= 2);
     assert.equal(await page.locator('#brand-overview').isVisible(), true);
     await page.locator('[data-brand=b0]').click();
@@ -71,6 +71,9 @@ const BASE = process.env.PORYADOK_TEST_URL || 'http://127.0.0.1:8014/';
     assert.equal(await page.evaluate(() => scrollY), 0);
     assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     assert.equal(await page.locator('#new-task').isVisible(), true);
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    const back = await page.locator('#header-back-portfolio').boundingBox();
+    assert(back.y >= 0 && back.y < 844);
     assert.deepEqual(errors, []);
     console.log('PASS: separate brand screen, portfolio scroll restoration, board/list context, drag/drop and keyboard status control, completion confirmation/cancel, history and layout persistence, simplified file menu, mobile board scrolling confined to board.');
   } finally { await browser.close(); }

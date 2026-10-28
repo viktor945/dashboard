@@ -217,3 +217,5 @@ body[data-workspace=personal] { --accent: #8653c7; --accent-soft: #f4edfc; }body
 }
 @media(max-width:370px) { .tabs button { font-size: 12px; padding: 8px; }.eyebrow { font-size: 10px; }.stat-card { padding: 14px 11px; }.stat-card > span { font-size: 12px; } }
 @media(prefers-reduced-motion:reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+
+.breadcrumb-back{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;padding:0;border:1px solid #dce2f2;border-radius:7px;color:#4f63c3;font-size:20px;flex-shrink:0}.breadcrumb-back:hover{background:#eef1ff}@media(max-width:760px){.brand-open main>header{position:sticky;top:0}}
