@@ -1,7 +1,7 @@
 'use strict';
-const CACHE='poryadok-shell-v3';
+const CACHE='poryadok-shell-v4';
 const ROOT=new URL('./',self.location.href);
-const FILES=['./','index.html','style.css','app.js','report-xlsx.js','report-import.js','cloud.js','config.js','install.js','security-check.js','manifest.webmanifest','icons/icon-192.png','icons/icon-512.png','icons/apple-touch-icon.png'];
+const FILES=['./','index.html','style.css','app.js','excel-export.js','report-xlsx.js','report-import.js','cloud.js','config.js','install.js','security-check.js','manifest.webmanifest','icons/icon-192.png','icons/icon-512.png','icons/apple-touch-icon.png'];
 const PATHS=new Set(FILES.map(file=>new URL(file,ROOT).pathname));
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES.map(file=>new URL(file,ROOT).href))).then(()=>self.skipWaiting()));});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('poryadok-shell-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim()));});
