@@ -4,7 +4,7 @@ class DashboardCloud {
  constructor(config) {
   this.url=(config.supabaseUrl||'').replace(/\/$/,'');this.key=config.supabasePublishableKey||'';
   this.session=null;this.user=null;this.revision=null;this.verifiedToken=null;
-  this.sessionKey='poryadok.auth.v1';
+  this.sessionKey='poryadok.auth.v1';this.trustedKey='poryadok.trusted-auth.v1';this.persistSession=false;
  }
  get configured(){if(this.key.split('.').length===3){try{if(JSON.parse(atob(this.key.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))).role==='service_role')return false;}catch{return false;}}return /^https:\/\/[a-z0-9-]+\.supabase\.co$/.test(this.url)&&!!this.key&&!this.key.startsWith('sb_secret_');}
  async request(path,{method='GET',body,headers={}}={}){
@@ -12,7 +12,16 @@ class DashboardCloud {
   const raw=await response.text();let result;try{result=raw?JSON.parse(raw):null;}catch{result=null;}
   if(!response.ok){const message=result?.msg||result?.message||result?.error_description||'';if(message==='Invalid login credentials')throw Error('Неверный email или пароль. Используйте пароль, заданный при создании пользователя в Supabase.');if(message==='Email not confirmed')throw Error('Email не подтверждён. Подтвердите его в Supabase или перейдите по новой ссылке из письма.');if(response.status===401&&path.includes('grant_type=password'))throw Error('Не удалось войти: проверьте email и пароль.');if(response.status===401)throw Error('Сессия истекла. Войдите снова.');if(response.status===409)throw Error('Данные уже изменились на другом устройстве. Обновите облачные данные.');throw Error(result?.msg||result?.message||result?.error_description||'Облачный сервис недоступен ('+response.status+')');}return result;
  }
- remember(session){this.session=session;sessionStorage.setItem(this.sessionKey,JSON.stringify(session));}
+ remember(session){this.session=session;sessionStorage.setItem(this.sessionKey,JSON.stringify(session));if(this.persistSession){try{localStorage.setItem(this.trustedKey,JSON.stringify(session));}catch{this.persistSession=false;this.persistenceWarning='Браузер не разрешил запомнить вход. Он действует до закрытия вкладки.';}}else{try{localStorage.removeItem(this.trustedKey);}catch{}}}
+ async qrLogin(tokenHash,ownerId,persistent,stillActive=()=>true){
+  const session=await this.request('/auth/v1/verify',{method:'POST',body:{type:'magiclink',token_hash:tokenHash}});
+  // Verify the new session with Auth before replacing any existing device session.
+  const user=await this.request('/auth/v1/user',{headers:{Authorization:'Bearer '+session.access_token}});
+  if(!session.access_token||!session.refresh_token||user?.id!==ownerId)throw Error('Аккаунт QR-кода не подтверждён. Создайте новый код.');
+  if(!stillActive()){try{await this.request('/auth/v1/logout?scope=local',{method:'POST',headers:{Authorization:'Bearer '+session.access_token}});}catch{}return false;}
+  this.persistSession=!!persistent;this.needsPassword=false;this.remember(session);this.user=user;this.verifiedToken=session.access_token;return true;
+ }
+
  async restore(){
   if(!this.configured)return false;
   const fragment=new URLSearchParams(location.hash.slice(1));
@@ -20,7 +29,7 @@ class DashboardCloud {
   if(fragment.has('access_token')){
    const session={access_token:fragment.get('access_token'),refresh_token:fragment.get('refresh_token'),expires_at:Math.floor(Date.now()/1000)+Number(fragment.get('expires_in')||3600)};
    history.replaceState(null,'',location.pathname+location.search);session.needs_password=true;this.remember(session);this.needsPassword=true;
-  }else{try{this.session=JSON.parse(sessionStorage.getItem(this.sessionKey)||'null');}catch{this.session=null;}}
+  }else{let temporary=null,trusted=null;try{temporary=JSON.parse(sessionStorage.getItem(this.sessionKey)||'null');}catch{}try{trusted=JSON.parse(localStorage.getItem(this.trustedKey)||'null');}catch{}this.session=temporary||trusted;this.persistSession=!!trusted&&(!temporary||temporary.refresh_token===trusted.refresh_token);}
   if(!this.session)return false;this.needsPassword=!!this.session.needs_password;await this.authorize();return true;
  }
  async authorize(){
@@ -29,10 +38,10 @@ class DashboardCloud {
   // Never trust a user ID from local storage or a decoded, unverified JWT.
   if(this.verifiedToken!==this.session.access_token||!this.user){this.user=await this.request('/auth/v1/user');this.verifiedToken=this.session.access_token;}
  }
- async login(email,password){const session=await this.request('/auth/v1/token?grant_type=password',{method:'POST',body:{email,password}});this.remember(session);await this.authorize();}
+ async login(email,password){this.persistSession=false;const session=await this.request('/auth/v1/token?grant_type=password',{method:'POST',body:{email,password}});this.remember(session);await this.authorize();}
  async password(password){await this.authorize();await this.request('/auth/v1/user',{method:'PUT',body:{password}});this.needsPassword=false;this.remember({...this.session,needs_password:false});}
  async reset(email){await this.request('/auth/v1/recover?redirect_to='+encodeURIComponent(location.origin+location.pathname),{method:'POST',body:{email}});}
- async logout(){try{if(this.session)await this.request('/auth/v1/logout',{method:'POST'});}finally{this.session=null;this.user=null;this.revision=null;this.verifiedToken=null;sessionStorage.removeItem(this.sessionKey);}}
+ async logout(){try{if(this.session)await this.request('/auth/v1/logout?scope=local',{method:'POST'});}finally{this.session=null;this.user=null;this.revision=null;this.verifiedToken=null;sessionStorage.removeItem(this.sessionKey);localStorage.removeItem(this.trustedKey);this.persistSession=false;}}
  async load({onlyIfChanged=false}={}){
   await this.authorize();const path='/rest/v1/dashboards?user_id=eq.'+encodeURIComponent(this.user.id);
   if(onlyIfChanged){const rows=await this.request(path+'&select=revision');const revision=rows[0]?.revision??null;if(revision===this.revision)return undefined;if(!rows.length){this.revision=null;return null;}}

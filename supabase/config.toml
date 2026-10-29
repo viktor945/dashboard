@@ -1,0 +1,5 @@
+project_id = "dashboard"
+
+[functions.device-link]
+# Receiver has no session yet; the handler verifies owners via Auth itself.
+verify_jwt = false

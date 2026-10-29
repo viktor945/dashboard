@@ -235,7 +235,7 @@ function accountUI() {
  $('#account-button').textContent=cloudMode?'Мой аккаунт':'Войти';
  $('#login-form').hidden=!cloud.configured||cloudMode;
  $('#password-form').hidden=!cloudMode||!cloud.needsPassword;
- $('#account-controls').hidden=!cloudMode;
+ $('#account-controls').hidden=!cloudMode;$('#device-link-panel').hidden=!cloudMode||!!cloud.needsPassword;window.PoryadokDeviceLink?.sync();
  $('#account-info').textContent=!cloud.configured?'Облачные аккаунты ещё не подключены. Пока можно пользоваться локальными задачами. Владелец приложения настраивает подключение Supabase.':cloudMode?'Личное пространство: '+(cloud.user?.email||'аккаунт'):'Войдите, чтобы работать со своими задачами на разных устройствах.';
  let localCount=0;try{const raw=localStorage.getItem(KEY);if(raw)localCount=validate(JSON.parse(raw)).tasks.length;}catch{}
  $('#migrate-local').textContent='Добавить задачи с этого устройства ('+localCount+')';
@@ -294,9 +294,10 @@ $('#close-bulk').onclick=()=>$('#bulk-dialog').close();$('#bulk-text').oninput=p
 $('#bulk-form').onsubmit=async e=>{e.preventDefault();const {titles,invalid}=bulkItems();if(invalid||!titles.length)return;const categoryId=$('#bulk-category').value;const tasks=titles.map(title=>({id:uid(),title,category:categoryId,workspace,priority:'medium',status:'todo',source:'self',due:'',description:'',link:'',history:[event('Задача добавлена из списка')]}));if(data.tasks.length+tasks.length>50000){toast('Превышен лимит задач.');return;}if(await update(n=>n.tasks.push(...tasks))){$('#bulk-dialog').close();category=null;view='all';$('#search').value='';$('#priority-filter').value='all';render();toast('Добавлено задач: '+tasks.length);}};
 async function initializeCloud(){
  cloudLoading=cloud.configured;accountUI();
- try{if(await cloud.restore()){await beginCloud();if(cloud.needsPassword){accountUI();$('#account-dialog').showModal();}}else{cloudLoading=false;if(cloud.invitationError){accountUI();$('#account-status').textContent=cloud.invitationError;$('#account-dialog').showModal();}}}
+ try{const mobile=await window.PoryadokDeviceLink.receive(cloud);if(mobile){switchWorkspace(mobile.workspace);await beginCloud();toast(cloud.persistenceWarning||'Телефон подключён к вашему аккаунту.');return;}if(await cloud.restore()){await beginCloud();if(cloud.needsPassword){accountUI();$('#account-dialog').showModal();}}else{cloudLoading=false;if(cloud.invitationError){accountUI();$('#account-status').textContent=cloud.invitationError;$('#account-dialog').showModal();}}}
  catch(error){if(cloud.session){cloudMode=true;data=initial();cloudLoading=true;render();accountUI();}else cloudLoading=false;setSync('Облачный вход не завершён: '+error.message);}
 }
+window.PoryadokDeviceLink.mount({cloud,context:()=>({cloudMode,cloudLoading,writeBusy,workspace})});
 render();if(storageBlocked)toast('Не удалось прочитать сохранённые данные. Исходное хранилище защищено от перезаписи.');
 initializeCloud();
 // Refresh only when no form is open or being edited; do not replace unsaved drafts.
