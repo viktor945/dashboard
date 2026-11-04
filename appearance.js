@@ -1,0 +1,22 @@
+'use strict';
+(() => {
+ const KEY='poryadok.appearance.v1',root=document.documentElement,media=matchMedia('(prefers-color-scheme: dark)');
+ let prefs={mode:'light',glass:true,vignette:true,background:'aurora'},storageOK=true;
+ try{const value=JSON.parse(localStorage.getItem(KEY)||'null');if(value&&typeof value==='object'){
+  if(['light','dark','system'].includes(value.mode))prefs.mode=value.mode;
+  for(const key of ['glass','vignette'])if(typeof value[key]==='boolean')prefs[key]=value[key];
+  if(['aurora','mesh','calm'].includes(value.background))prefs.background=value.background;
+ }}catch{storageOK=false;}
+ function apply(){const dark=prefs.mode==='dark'||prefs.mode==='system'&&media.matches;root.dataset.theme=dark?'dark':'light';root.dataset.glass=String(prefs.glass);root.dataset.vignette=String(prefs.vignette);root.dataset.background=prefs.background;root.style.colorScheme=dark?'dark':'light';const meta=document.querySelector('meta[name=theme-color]');if(meta)meta.content=dark?'#141b2d':'#edf3fb';}
+ window.PoryadokAppearance={refresh:apply};
+ apply();media.addEventListener('change',()=>{if(prefs.mode==='system')apply();});
+ addEventListener('storage',e=>{if(e.key===KEY&&e.newValue){try{const p=JSON.parse(e.newValue);if(['light','dark','system'].includes(p.mode)&&typeof p.glass==='boolean'&&typeof p.vignette==='boolean'&&['aurora','mesh','calm'].includes(p.background)){prefs=p;apply();}}catch{}}});
+ document.addEventListener('DOMContentLoaded',()=>{
+  const $=s=>document.querySelector(s);
+  $('#account-button').insertAdjacentHTML('beforebegin','<button id="appearance-button" class="appearance-button" title="Тема и оформление" aria-label="Тема и оформление"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14A8 8 0 0 1 10 4a8 8 0 1 0 10 10Z"/></svg></button>');
+  document.body.insertAdjacentHTML('beforeend','<dialog id="appearance-dialog" aria-labelledby="appearance-title"><div class="dialog-header"><div><span class="dialog-kicker">ВАШЕ ПРОСТРАНСТВО</span><h2 id="appearance-title">Тема и оформление</h2></div><button class="close" id="close-appearance" aria-label="Закрыть">×</button></div><p class="appearance-intro">Настройте рабочее место под себя. Изменения видны сразу.</p><fieldset class="theme-options"><legend>Тема интерфейса</legend>'+[['light','Светлая'],['dark','Тёмная'],['system','Как в системе']].map(([v,title])=>'<label class="theme-choice"><input type="radio" name="appearance-mode" value="'+v+'"><span class="theme-preview preview-'+v+'"><i></i><span><b></b><b></b><b></b></span></span><strong>'+title+'</strong></label>').join('')+'</fieldset><label>Фон<select id="appearance-background"><option value="aurora">Северное сияние — мягкие цветовые пятна</option><option value="mesh">Графическая сетка — спокойный ритм</option><option value="calm">Спокойный — лёгкий градиент</option></select></label><div class="appearance-toggles"><label><span><b>Прозрачные панели</b><small>Матовые поверхности с мягким размытием фона</small></span><input id="appearance-glass" type="checkbox" role="switch"></label><label><span><b>Виньетка</b><small>Лёгкое затемнение по краям экрана</small></span><input id="appearance-vignette" type="checkbox" role="switch"></label></div><p class="appearance-hint" id="appearance-status" role="status">Оформление сохраняется в этом браузере и применяется к обоим планировщикам.</p><button class="primary" id="appearance-done">Готово</button></dialog>');
+  const sync=()=>{document.querySelectorAll('[name=appearance-mode]').forEach(i=>i.checked=i.value===prefs.mode);$('#appearance-background').value=prefs.background;$('#appearance-glass').checked=prefs.glass;$('#appearance-vignette').checked=prefs.vignette;};
+  $('#appearance-button').onclick=()=>{sync();$('#appearance-dialog').showModal();};$('#close-appearance').onclick=()=>$('#appearance-dialog').close();$('#appearance-done').onclick=()=>$('#appearance-dialog').close();
+  $('#appearance-dialog').onchange=e=>{if(e.target.name==='appearance-mode')prefs.mode=e.target.value;else if(e.target.id==='appearance-background')prefs.background=e.target.value;else if(e.target.id==='appearance-glass')prefs.glass=e.target.checked;else if(e.target.id==='appearance-vignette')prefs.vignette=e.target.checked;else return;apply();try{localStorage.setItem(KEY,JSON.stringify(prefs));storageOK=true;}catch{storageOK=false;}$('#appearance-status').textContent=storageOK?'Оформление сохранено в этом браузере.':'Тема применена. Браузер не разрешил сохранить настройку после закрытия.';};
+ });
+})();

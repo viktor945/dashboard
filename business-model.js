@@ -27,7 +27,7 @@
    if(c.currency!==undefined&&!['KZT','RUB','USD','EUR'].includes(c.currency))bad('Неверная валюта бренда');
    if(c.catalogKey!==undefined&&!str(c.catalogKey,100,true))bad('Неверный ключ портфеля');
    const seen=new Set();const record=r=>{if(!r||!str(r.id,100,true)||seen.has(r.id))bad('Повторяющаяся или неверная запись бренда');seen.add(r.id);};
-   const periods=new Set();for(const r of rows(c,'sales',240)){if(!r||!month(r.month)||periods.has(r.month)||!money(r.plan)||!money(r.actual))bad('План и факт должны быть неотрицательными числами с точностью до копеек');periods.add(r.month);log(r.log);}
+   const periods=new Set();for(const r of rows(c,'sales',240)){if(!r||!month(r.month)||periods.has(r.month)||!money(r.plan)||!money(r.actual))bad('План и факт должны быть неотрицательными числами с точностью до копеек');if(r.liveStock!==undefined&&r.liveStock!==null&&(!money(r.liveStock)||r.liveStock>100))bad('Живой сток должен быть процентом от 0 до 100');periods.add(r.month);log(r.log);}
    const orders=rows(c,'orders',500);for(const r of orders){record(r);if(!str(r.title,200,true)||!str(r.number,100)||!str(r.supplier,200)||!str(r.notes,5000)||!Object.hasOwn(STAGES,r.stage)||!Object.hasOwn(PAYMENTS,r.payment)||!money(r.amount)||!date(r.due)||!date(r.reminderDate)||!str(r.reminderTime,5)||r.reminderTime&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(r.reminderTime)||r.reminderTime&&!r.reminderDate)bad('Неверные данные заказа');log(r.log);}
    for(const r of rows(c,'brandNotes',1000)){record(r);if(!str(r.text,5000,true)||!date(r.date)||!str(r.time,5)||r.time&&!/^([01]\d|2[0-3]):[0-5]\d$/.test(r.time)||r.time&&!r.date||typeof r.done!=='boolean'||r.orderId!==null&&!orders.some(o=>o.id===r.orderId))bad('Неверная заметка или ссылка на заказ');}
    for(const r of rows(c,'clearanceItems',500)){record(r);if(!str(r.title,200,true)||!str(r.reason,2000,true)||!str(r.notes,5000)||!str(r.manager,120)||!str(r.client,200)||!date(r.date)||!r.checks||Object.keys(r.checks).length!==3||Object.keys(CHECKS).some(k=>typeof r.checks[k]!=='boolean')||!Array.isArray(r.photos)||r.photos.length>5)bad('Неверная карточка уценки');const photos=new Set();for(const p of r.photos){if(!p||!str(p.id,100,true)||photos.has(p.id)||!str(p.name,200,true)||typeof p.data!=='string'||p.data.length>160023||!/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/]*={0,2}$/.test(p.data))bad('Неверное фото: разрешена уменьшенная JPEG-копия до 120 КБ');photos.add(p.id);}log(r.log);}
@@ -47,12 +47,23 @@
   add('Уценка','clearance',null,'clearance');
   return {next,changes};
  }
- function salesSnapshot(c,period){const r=(c.sales||[]).find(r=>r.month===period);return {plan:r?.plan??null,actual:r?.actual??null,percent:r?.plan>0&&r.actual!==null?Math.round(r.actual/r.plan*100):null};}
+ function salesSnapshot(c,period){const r=(c.sales||[]).find(r=>r.month===period);return {plan:r?.plan??null,actual:r?.actual??null,liveStock:r?.liveStock??null,percent:r?.plan>0&&r.actual!==null?Math.round(r.actual/r.plan*100):null};}
+ // Compare only one currency and one hierarchy level. A selected child stands alone.
+ function metricsRows(data,period,currency='KZT',brandId=''){
+  return data.categories.filter(c=>isBrand(c)&&(brandId?c.id===brandId:!c.parentId)&&(c.currency||'KZT')===currency).map(c=>{
+   const snapshot=enabled(c,'sales')?salesSnapshot(c,period):{plan:null,actual:null,percent:null,liveStock:null},ids=branchIds(data,c.id);
+   return {category:c,...snapshot,openTasks:data.tasks.filter(t=>ids.has(t.category)&&t.status!=='done').length};
+  }).sort((a,b)=>a.category.name.localeCompare(b.category.name,'ru'));
+ }
+ function metricsSummary(rows){
+  const plans=rows.filter(r=>r.plan!==null),facts=rows.filter(r=>r.actual!==null),plan=plans.reduce((n,r)=>n+r.plan,0),actual=facts.reduce((n,r)=>n+r.actual,0),complete=rows.length>0&&rows.every(r=>r.plan!==null&&r.actual!==null);
+  return {plan:plans.length?plan:null,actual:facts.length?actual:null,planCount:plans.length,actualCount:facts.length,count:rows.length,percent:complete&&plan>0?Math.round(actual/plan*100):null};
+ }
  function reminders(data,scope='work'){
   const list=[];for(const c of data.categories.filter(c=>c.workspace===scope)){
    if(enabled(c,'notes'))for(const n of c.brandNotes||[])if(n.date&&!n.done)list.push({id:n.id,category:c.id,title:n.text,date:n.date,time:n.time||'09:00',kind:'note',label:c.name});
    if(enabled(c,'orders'))for(const o of c.orders||[])if(o.reminderDate&&o.stage!=='delivered')list.push({id:o.id,category:c.id,title:o.title,date:o.reminderDate,time:o.reminderTime||'09:00',kind:'order',label:c.name});
   }return list.sort((a,b)=>(a.date+'T'+a.time).localeCompare(b.date+'T'+b.time));
  }
- window.PoryadokBusinessModel={ROOTS,DIRECTIONS,STAGES,PAYMENTS,CHECKS,norm,isBrand,enabled,date,month,validate,branchIds,pathName,children,catalogPlan,salesSnapshot,reminders};
+ window.PoryadokBusinessModel={ROOTS,DIRECTIONS,STAGES,PAYMENTS,CHECKS,norm,isBrand,enabled,date,month,validate,branchIds,pathName,children,catalogPlan,salesSnapshot,metricsRows,metricsSummary,reminders};
 })();
