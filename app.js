@@ -1,6 +1,8 @@
 'use strict';
-const KEY = 'poryadok.tasks.v1';
-const cloud = new DashboardCloud(window.PORYADOK_CONFIG || {});
+const demoMode=window.PoryadokDemo.active;
+const preferenceKey=window.PoryadokDemo.preferenceKey;
+const KEY = demoMode?window.PoryadokDemo.key:'poryadok.tasks.v1';
+const cloud = new DashboardCloud(demoMode?{}:window.PORYADOK_CONFIG || {});
 let cloudMode=false, writeBusy=false, cloudLoading=false, accountEpoch=0;
 const $ = s => document.querySelector(s);
 const priorities = {high:'Высокий',medium:'Средний',low:'Низкий'};
@@ -8,7 +10,7 @@ const statuses = {todo:'К выполнению',progress:'В работе',wait
 const viewNames = {all:'Все задачи',today:'Мой день',incoming:'Входящие',attention:'Требуют внимания',waiting:'Ожидаем ответа',unassigned:'Без бренда / другие задачи',done:'Завершённые'};
 const workspaceNames={work:'Рабочее',personal:'Личное'};
 let workspace='work';
-try{const chosen=new URLSearchParams(location.search).get('workspace')||localStorage.getItem('poryadok.workspace.v1');if(Object.hasOwn(workspaceNames,chosen))workspace=chosen;}catch{}
+try{const chosen=new URLSearchParams(location.search).get('workspace')||(demoMode?'work':localStorage.getItem(preferenceKey('poryadok.workspace.v1')));if(Object.hasOwn(workspaceNames,chosen))workspace=chosen;}catch{}
 const colors = ['#be9561','#8894b9','#619e86','#be8593','#7d9eaf'];
 const arrowIcon='<svg viewBox="0 0 24 24" aria-hidden="true" class="icon"><path d="M6 18 18 6M6 6h12v12"/></svg>';
 const brandColors=['sage','violet','amber','blue','rose','cyan','slate'];
@@ -37,10 +39,10 @@ function validate(data) {
   window.PoryadokBusinessModel.validate(data);
   return data;
 }
-let data = initial(), storageBlocked = false;
-try { const stored = localStorage.getItem(KEY); if (stored) data = validate(JSON.parse(stored)); } catch { storageBlocked = true; }
+let data = demoMode?validate(window.PoryadokDemo.create()):initial(), storageBlocked = false;
+try { const stored = localStorage.getItem(KEY); if (stored) {const parsed=JSON.parse(stored);if(!demoMode||parsed.demoMeta?.version===1&&parsed.demoMeta.month===window.PoryadokDemo.period())data=validate(parsed);} } catch { storageBlocked = true; }
 let view='all', category=null, layout='groups', portfolioScroll=0, lastOpenedBrand=null, edited=null, toastTimer, categoryEdited=null;
-try{const saved=localStorage.getItem('poryadok.layout.v1');if(['groups','list','board'].includes(saved))layout=saved;}catch{}
+try{const saved=localStorage.getItem(preferenceKey('poryadok.layout.v1'));if(['groups','list','board'].includes(saved))layout=saved;}catch{}
 function toast(message) { $('#toast').textContent=message; $('#toast').hidden=false; clearTimeout(toastTimer); toastTimer=setTimeout(()=>$('#toast').hidden=true,6000); }
 async function commit(next) {
   try{next=validate(next);if(new Blob([JSON.stringify(next)]).size>19000000)throw Error('Превышен размер данных аккаунта. Сохраните архив и уберите лишние фотографии.');}catch(error){toast(error.message);return false;}
@@ -113,14 +115,14 @@ function render(){
  PoryadokBusiness.render();
  PoryadokInsights.render();
 }
-function taskLayout(){try{return localStorage.getItem('poryadok.task-layout.v1')==='board'?'board':'list';}catch{return 'list';}}
+function taskLayout(){try{return localStorage.getItem(preferenceKey('poryadok.task-layout.v1'))==='board'?'board':'list';}catch{return 'list';}}
 function revealBrand(id){
  if(workspace==='work'&&isGeneral(data.categories.find(c=>c.id===id))){category=null;view='unassigned';layout=taskLayout();render();window.scrollTo({top:0,behavior:'instant'});return;}
  if(!category&&view==='all'&&layout==='groups')portfolioScroll=window.scrollY;
  category=id;lastOpenedBrand=id;view='all';layout=taskLayout();$('#show-completed').checked=false;$('#status-filter').value='all';render();window.scrollTo({top:0,behavior:'instant'});
  const heading=$('#brand-detail-heading h2');heading.tabIndex=-1;heading.focus({preventScroll:true});
 }
-function backToPortfolio(){category=null;view='all';layout='groups';$('#show-completed').checked=false;$('#status-filter').value='all';try{localStorage.setItem('poryadok.layout.v1',layout);}catch{}render();window.scrollTo({top:portfolioScroll,behavior:'instant'});Array.from(document.querySelectorAll('[data-brand]')).find(b=>b.dataset.brand===lastOpenedBrand)?.focus({preventScroll:true});}
+function backToPortfolio(){category=null;view='all';layout='groups';$('#show-completed').checked=false;$('#status-filter').value='all';try{localStorage.setItem(preferenceKey('poryadok.layout.v1'),layout);}catch{}render();window.scrollTo({top:portfolioScroll,behavior:'instant'});Array.from(document.querySelectorAll('[data-brand]')).find(b=>b.dataset.brand===lastOpenedBrand)?.focus({preventScroll:true});}
 function board(tasks){
  return '<div class="kanban-board" aria-label="Доска задач">'+Object.entries(statuses).map(([status,label])=>{
   const list=tasks.filter(t=>t.status===status),heading=status==='done'?'Завершено':label;
@@ -151,7 +153,7 @@ const recordNames={note:'Заметка',report:'Отчёт о работе',cha
 function renderHistory() { const t=data.tasks.find(t=>t.id===edited); $('#history').innerHTML=(t?.history||[]).map(h=>`<div class="event ${h.kind}"><time>${h.kind==='note'?escapeHTML(recordNames[h.recordType]||'Заметка')+' · ':''}${escapeHTML(new Date(h.at).toLocaleString('ru-RU'))}</time>${escapeHTML(h.text)}</div>`).join(''); }
 function switchWorkspace(scope){
  workspace=scope;view='all';category=null;portfolioScroll=0;lastOpenedBrand=null;$('#show-completed').checked=false;$('#status-filter').value='all';$('#search').value='';$('#priority-filter').value='all';
- try{localStorage.setItem('poryadok.workspace.v1',scope);}catch{}
+ try{localStorage.setItem(preferenceKey('poryadok.workspace.v1'),scope);}catch{}
  const url=new URL(location.href);url.searchParams.set('workspace',scope);history.replaceState(null,'',url.pathname+url.search+url.hash);render();
 }
 $('#workspace-switch').onclick=e=>{const button=e.target.closest('[data-workspace]');if(button)switchWorkspace(button.dataset.workspace);};
@@ -160,7 +162,7 @@ $('#current-date').textContent=new Date().toLocaleDateString('ru-RU',{weekday:'l
 $('#views').onclick=e=>{const b=e.target.closest('[data-view]');if(b){if(b.dataset.view==='all'){backToPortfolio();return;}view=b.dataset.view;category=null;$('#show-completed').checked=view==='done';$('#status-filter').value='all';render();}};
 $('#categories').onclick=e=>{const b=e.target.closest('[data-category]');if(b)revealBrand(b.dataset.category);};
 $('.stats').onclick=e=>{const b=e.target.closest('[data-stat]');if(b){view=b.dataset.stat;category=null;$('#priority-filter').value='all';$('#status-filter').value='all';$('#show-completed').checked=view==='done';render();}};
-$('.tabs').onclick=e=>{const b=e.target.closest('[data-layout]');if(b){layout=b.dataset.layout;if(layout!=='groups')PoryadokBusiness.activateTasks(false);try{localStorage.setItem('poryadok.layout.v1',layout);if(layout!=='groups')localStorage.setItem('poryadok.task-layout.v1',layout);}catch{}if(layout==='groups'){backToPortfolio();return;}render();}};
+$('.tabs').onclick=e=>{const b=e.target.closest('[data-layout]');if(b){layout=b.dataset.layout;if(layout!=='groups')PoryadokBusiness.activateTasks(false);try{localStorage.setItem(preferenceKey('poryadok.layout.v1'),layout);if(layout!=='groups')localStorage.setItem(preferenceKey('poryadok.task-layout.v1'),layout);}catch{}if(layout==='groups'){backToPortfolio();return;}render();}};
 $('#demo-overview').onclick=()=>seedExamples();
 $('#general-summary').onclick=()=>{view='unassigned';category=null;render();};
 $('#general-directions').onclick=e=>{const edit=e.target.closest('[data-general-edit]');if(edit)openBrand(edit.dataset.generalEdit);else if(e.target.closest('[data-general-create]')){openBrand();$('#category-kind').value='general';}};
@@ -239,12 +241,8 @@ $('#export-csv').onclick=()=>{downloadFile(csvReport(),'text/csv;charset=utf-8',
 $('#export').onclick=()=>{downloadFile(JSON.stringify(data,null,2),'application/json;charset=utf-8',`poryadok-backup-${today()}.json`);toast('Резервная копия скачана. Храните её для восстановления.');};
 $('#import').onclick=()=>$('#import-file').click();
 $('#import-file').onchange=async e=>{const file=e.target.files[0];if(!file)return;try{if(file.size>20000000)throw Error('Файл больше 20 МБ');const next=validate(JSON.parse(await file.text()));if(!confirm(`Восстановить ${next.tasks.length} задач и ${next.categories.length} категорий? Текущие ${data.tasks.length} задач будут заменены. Сначала сохраните экспорт, если они вам нужны.`))return;if(storageBlocked)throw Error('Хранилище повреждено или недоступно. Импорт отменён для защиты исходных данных.');if(await commit(next)){$('#data-dialog').close();category=null;view='all';$('#search').value='';$('#priority-filter').value='all';render();toast('Данные восстановлены');}}catch(error){toast('Импорт отменён: '+error.message);}finally{e.target.value='';}};
-async function seedExamples(){
- if(spaceTasks().length)return;
- const date=offset=>{const d=new Date();d.setDate(d.getDate()+offset);return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
- const samples=workspace==='work'?[['Бренд Альфа','Согласовать заказ поставщику','high','progress',-1],['Бренд Альфа','Подготовить материалы для обучения','medium','todo',2],['Бренд Бета','Уточнить дату отгрузки','high','waiting',0],['Бренд Бета','Обновить карточки на сайте','low','todo',5],['Бренд Гамма','Согласовать презентацию','medium','waiting',3],['Бренд Гамма','Отправить коммерческое предложение','low','done',-2]]:[['Личные дела','Запланировать выходные','medium','todo',3],['Личные дела','Записаться на обследование','high','todo',1]];
- if(await update(n=>{for(const [name,title,priority,status,offset] of samples){const label='[Демо] '+name;let c=n.categories.find(c=>c.workspace===workspace&&c.name===label);if(!c){c={id:uid(),name:label,workspace,color:brandColors[n.categories.length%brandColors.length]};n.categories.push(c);}n.tasks.push({id:uid(),title:'[Демо] '+title,category:c.id,workspace,priority,status,due:date(offset),dueTime:'',source:'self',description:'Демонстрационная задача. Её можно изменить или удалить.',link:'',history:[event('Создан демонстрационный пример')]});}}))toast('Добавлены демонстрационные примеры с меткой [Демо].');
-}
+function seedExamples(){window.PoryadokDemo.open();}
+
 function setSync(message) { $('#sync-banner').hidden=!message; $('#sync-banner').textContent=message||''; }
 function accountUI() {
  $('#account-button').textContent=cloudMode?'Мой аккаунт':'Войти';
@@ -309,14 +307,16 @@ $('#bulk-button').onclick=()=>{$('#bulk-form').reset();$('#bulk-category').inner
 $('#close-bulk').onclick=()=>$('#bulk-dialog').close();$('#bulk-text').oninput=previewBulk;
 $('#bulk-form').onsubmit=async e=>{e.preventDefault();const {titles,invalid}=bulkItems();if(invalid||!titles.length)return;const categoryId=$('#bulk-category').value;const tasks=titles.map(title=>({id:uid(),title,category:categoryId,workspace,priority:'medium',status:'todo',source:'self',due:'',description:'',link:'',history:[event('Задача добавлена из списка')]}));if(data.tasks.length+tasks.length>50000){toast('Превышен лимит задач.');return;}if(await update(n=>n.tasks.push(...tasks))){$('#bulk-dialog').close();category=null;view='all';$('#search').value='';$('#priority-filter').value='all';render();toast('Добавлено задач: '+tasks.length);}};
 async function initializeCloud(){
+ if(demoMode)return;
  cloudLoading=cloud.configured;accountUI();
  try{const mobile=await window.PoryadokDeviceLink.receive(cloud);if(mobile){switchWorkspace(mobile.workspace);await beginCloud();toast(cloud.persistenceWarning||'Телефон подключён к вашему аккаунту.');return;}if(await cloud.restore()){await beginCloud();if(cloud.needsPassword){accountUI();$('#account-dialog').showModal();}}else{cloudLoading=false;if(cloud.invitationError){accountUI();$('#account-status').textContent=cloud.invitationError;$('#account-dialog').showModal();}}}
  catch(error){if(cloud.session){cloudMode=true;data=initial();cloudLoading=true;render();accountUI();}else cloudLoading=false;setSync('Облачный вход не завершён: '+error.message);}
 }
 window.PoryadokDeviceLink.mount({cloud,context:()=>({cloudMode,cloudLoading,writeBusy,workspace})});
 PoryadokBusiness.mount({getData:()=>data,update,toast,openBrand,revealBrand,redraw:render,context:()=>({workspace,category,view,layout,cloudMode,cloudLoading,writeBusy,accountEpoch})});
-PoryadokInsights.mount({getData:()=>data,context:()=>({workspace,category,view,layout,accountEpoch}),visibleTasks,redraw:render,openTask,changeTaskStatus,openBrand,showTable:()=>{category=null;view='all';layout='list';try{localStorage.setItem('poryadok.layout.v1','list');}catch{}render();},openTasks:id=>{category=id||null;view='all';layout='list';try{localStorage.setItem('poryadok.layout.v1','list');localStorage.setItem('poryadok.task-layout.v1','list');}catch{}$('#show-completed').checked=false;$('#status-filter').value='all';$('#priority-filter').value='all';$('#search').value='';PoryadokBusiness.activateTasks(false);render();window.scrollTo({top:0,behavior:'instant'});}});
+PoryadokInsights.mount({getData:()=>data,context:()=>({workspace,category,view,layout,accountEpoch}),visibleTasks,redraw:render,openTask,changeTaskStatus,openBrand,showTable:()=>{category=null;view='all';layout='list';try{localStorage.setItem(preferenceKey('poryadok.layout.v1'),'list');}catch{}render();},openTasks:id=>{category=id||null;view='all';layout='list';try{localStorage.setItem(preferenceKey('poryadok.layout.v1'),'list');localStorage.setItem(preferenceKey('poryadok.task-layout.v1'),'list');}catch{}$('#show-completed').checked=false;$('#status-filter').value='all';$('#priority-filter').value='all';$('#search').value='';PoryadokBusiness.activateTasks(false);render();window.scrollTo({top:0,behavior:'instant'});}});
 render();if(storageBlocked)toast('Не удалось прочитать сохранённые данные. Исходное хранилище защищено от перезаписи.');
+window.PoryadokDemo.mount();
 initializeCloud();
 // Refresh only when no form is open or being edited; do not replace unsaved drafts.
 setInterval(async()=>{if(!cloudMode||writeBusy||cloudLoading||document.hidden||$('dialog[open]')||$('#sales-form[data-dirty=true]')||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName))return;try{await loadCloud(true);}catch(error){setSync('Не удалось обновить облачные данные: '+error.message);}},30000);
